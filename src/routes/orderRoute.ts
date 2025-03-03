@@ -5,7 +5,7 @@ import { checkSaleTime } from "../middleware/checkSaleTime";
 
 const router = express.Router();
 
-router.post("/", authenticateUser, checkSaleTime, createOrder);
-router.get("/leaderboard", getLeaderboard);
+router.post("/order/create", authenticateUser, checkSaleTime, createOrder);
+router.get("/order/:salesEventId/leaderboard", getLeaderboard);
 
 export default router;

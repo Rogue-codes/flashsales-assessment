@@ -53,7 +53,6 @@ const SalesEventSchema: Schema<ISalesEvent> = new Schema(
         stockCount: {
           type: Number,
           required: true,
-          min: 200,
         },
       },
     ],

@@ -1,40 +1,34 @@
 import { Request, Response } from "express";
 import mongoose from "mongoose";
 import salesEventModel from "../models/salesEventModel";
-import orderModel from "../models/orderModel";
-import productModel from "../models/productModel";
 import { AuthRequest } from "../middleware/authMiddleware";
+import ordersModel from "../models/ordersModel";
 
 // Create an order (Purchase product in flash sale)
-export const createOrder = async (req: AuthRequest, res: Response):Promise<any> => {
+export const createOrder = async (req: AuthRequest, res: Response): Promise<any> => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { productId, quantity } = req.body;
+    const { salesEventId, productId, quantity } = req.body;
     const user = req.user;
 
-    if (!productId || !quantity || quantity < 1) {
+    if (!salesEventId || !productId || !quantity || quantity < 1) {
       return res.status(400).json({ success: false, message: "Invalid order data" });
     }
 
-    // Find active sales event for this product
-    const activeSale = await salesEventModel.findOne({ 
-      "products.productId": productId, 
-      isActive: true 
+    // Find the specific active sales event
+    const activeSale = await salesEventModel.findOne({
+      _id: salesEventId, 
+      "products.productId": productId,
+      isActive: true,
     }).session(session);
 
     if (!activeSale) {
       return res.status(400).json({ success: false, message: "No active sale for this product" });
     }
 
-    // Check if product exists
-    const product = await productModel.findById(productId).session(session);
-    if (!product) {
-      return res.status(404).json({ success: false, message: "Product not found" });
-    }
-
-    // Get the product details from the active sale
+    // Get the product details from the sales event
     const saleProduct = activeSale.products.find(p => p.productId.toString() === productId);
     if (!saleProduct || saleProduct.stockCount < quantity) {
       return res.status(400).json({ success: false, message: "Not enough stock" });
@@ -43,16 +37,17 @@ export const createOrder = async (req: AuthRequest, res: Response):Promise<any> 
     // Calculate total amount
     const totalAmount = saleProduct.price * quantity;
 
-    // Deduct stock from sales event
+    // Deduct stock from the specific sales event
     saleProduct.stockCount -= quantity;
     await activeSale.save({ session });
 
-    // Create order record
-    const order = await orderModel.create([{ 
+    // Create order record, linking to sales event
+    const order = await ordersModel.create([{ 
       user: user._id, 
       product: productId, 
       quantity, 
-      totalAmount 
+      totalAmount,
+      salesEvent: salesEventId // Link the order to the sales event
     }], { session });
 
     // Commit transaction
@@ -73,13 +68,21 @@ export const createOrder = async (req: AuthRequest, res: Response):Promise<any> 
   }
 };
 
+
+
 // Get the leaderboard (sorted by purchase time)
-export const getLeaderboard = async (req: Request, res: Response):Promise<any> => {
+export const getLeaderboard = async (req: Request, res: Response): Promise<any> => {
   try {
-    const leaderboard = await orderModel
-      .find()
-      .populate("user", "name email")  // Populate user info
-      .sort({ createdAt: 1 })  // Sort by earliest purchase
+    const { salesEventId } = req.params; // Get salesEventId from request params
+
+    if (!salesEventId) {
+      return res.status(400).json({ success: false, message: "Sales event ID is required" });
+    }
+
+    const leaderboard = await ordersModel
+      .find({ salesEvent: salesEventId }) // Filter by sales event
+      .populate("user", "name email") // Populate user info
+      .sort({ createdAt: -1 }) // Sort by latest purchase first
       .limit(50); // Limit to top 50
 
     return res.status(200).json({
