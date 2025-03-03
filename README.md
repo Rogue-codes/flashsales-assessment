@@ -1,5 +1,3 @@
-# flashsales-assessment
-
 # Happy Store
 
 Happy Store is an e-commerce application built with TypeScript, Express, and MongoDB. This application supports user registration, email verification, product management, sales events, and order processing.
@@ -11,6 +9,12 @@ Happy Store is an e-commerce application built with TypeScript, Express, and Mon
 - [Project Structure](#project-structure)
 - [API Endpoints](#api-endpoints)
 - [Environment Variables](#environment-variables)
+- [User Flow](#user-flow)
+- [Product Creation Flow](#product-creation-flow)
+- [Sales Event Creation Flow](#sales-event-creation-flow)
+- [Relationship Between SalesEvent and Product](#relationship-between-salesevent-and-product)
+- [Order Creation Flow](#order-creation-flow)
+- [Handling Race Conditions](#handling-race-conditions)
 - [License](#license)
 
 ## Installation
@@ -26,7 +30,7 @@ Happy Store is an e-commerce application built with TypeScript, Express, and Mon
     npm install
     ```
 
-3. Create a [.env](http://_vscodecontentref_/1) file in the root directory and add the following environment variables:
+3. Create a [.env](http://_vscodecontentref_/0) file in the root directory and add the following environment variables:
     ```env
     PORT=5000
     MONGO_URI=your_mongodb_uri
@@ -90,7 +94,7 @@ Once the server is running, you can access the API at `http://localhost:5000/api
 ## Environment Variables
 
 - **PORT**: The port on which the server will run.
-- **MONGO_URI**: The MongoDB connection string.
+- **MONGO_URI**: The  connectionMongoDB string.
 - **JWT_SECRET**: The secret key for JWT token generation.
 - **USERNAME**: The email username for sending emails.
 - **APP_PASSWORD**: The email app password for sending emails.
@@ -196,29 +200,171 @@ In the Happy Store application, there is a relationship between `SalesEvent` and
 The `SalesEvent` model represents a sales event in the system. It includes details such as the name, description, start date, end date, and whether the event is active.
 
 ```typescript
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document } from "mongoose";
 
-export interface ISalesEvent extends Document {
-  name: string;
-  description: string;
-  startDate: Date;
-  endDate: Date;
-  isActive: boolean;
+export enum DISCOUNT_TYPE {
+  PERCENTAGE = "percentage",
+  FIXED = "fixed",
 }
 
-const SalesEventSchema: Schema = new Schema({
-  name: { type: String, required: true },
-  description: { type: String, required: true },
-  startDate: { type: Date, required: true },
-  endDate: { type: Date, required: true },
-  isActive: { type: Boolean, default: false },
-});
+export enum SCHEDULE_OPTION {
+  ONE_OFF = "one-off",
+  REOCCURING = "reoccuring",
+}
 
+export interface ISalesEvent extends Document {
+  title: string;
+  description?: string;
+  discountType: DISCOUNT_TYPE;
+  discountValue: number;
+  startDate: Date;
+  startTime: string;
+  isActive: boolean;
+  scheduleOption: SCHEDULE_OPTION;
+  products: {
+    productId: mongoose.Types.ObjectId;
+    price: number;
+    stockCount: number;
+  }[];
+  nextStartDate: Date; // if scheduleOption is set to reoccuring, the next start date should be provided
+}
+
+const SalesEventSchema: Schema<ISalesEvent> = new Schema(
+  {
+    title: { type: String, required: true, trim: true, unique:true},
+    description: { type: String, trim: true },
+    discountType: { type: String, enum: DISCOUNT_TYPE, required: true },
+    discountValue: { type: Number, required: true },
+    startDate: { type: Date, required: true },
+    startTime: {
+      type: String,
+      required: true,
+      match: /^([0-1]\d|2[0-3]):([0-5]\d):([0-5]\d)$/,
+    },
+    isActive: { type: Boolean, default: false },
+    scheduleOption: { type: String, enum: SCHEDULE_OPTION, required: true },
+    nextStartDate: { type: Date, default: null },
+    products: [
+      {
+        productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+        price: {
+          type: Number,
+          required: true,
+          min: 0,
+        },
+        stockCount: {
+          type: Number,
+          required: true,
+        },
+      },
+    ],
+  },
+  { timestamps: true }
+);
+
+// Auto activate event if scheduled and within time range
+SalesEventSchema.pre("save", function (next) {
+  const now = new Date();
+  if (this.startDate <= now) {
+    this.isActive = true;
+  } else {
+    this.isActive = false;
+  }
+  next();
+});
 export default mongoose.model<ISalesEvent>('SalesEvent', SalesEventSchema);
 
-```Relationship
+Product Model
+The Product model represents a product in the system. It includes details such as the name, description, price, and a reference to the associated sales event.
+
+import mongoose, { Schema, Document } from 'mongoose';
+
+export interface IProduct extends Document {
+  name: string;
+  description: string;
+  price: number;
+  salesEvent: mongoose.Types.ObjectId;
+}
+
+const ProductSchema: Schema = new Schema({
+  name: { type: String, required: true },
+  description: { type: String, required: true },
+  price: { type: Number, required: true },
+  salesEvent: { type: mongoose.Types.ObjectId, ref: 'SalesEvent' },
+});
+
+export default mongoose.model<IProduct>('Product', ProductSchema);
+
+Relationship
 The relationship between SalesEvent and Product is established through the salesEvent field in the Product model. This field is a reference to the SalesEvent model, indicating that a product can be associated with a specific sales event.
 
 One-to-Many Relationship: A single sales event can have multiple products associated with it. This is represented by the salesEvent field in the Product model, which references the _id of a SalesEvent.
 Example Usage
-When creating a product, the admin user can specify the salesEvent to which the product belongs. This allows the system to manage and display products that are part of a sales event. This relationship ensures that products can be organized and managed within the context of sales events, providing a seamless experience for both admins and users.
+When creating a product, the admin user can specify the salesEvent to which the product belongs. This allows the system to manage and display products that are part of a sales event.
+
+const newProduct = new Product({
+  name: 'Product Name',
+  description: 'Product Description',
+  price: 100,
+  salesEvent: salesEventId, // Reference to the associated sales event
+});
+
+await newProduct.save();
+
+his relationship ensures that products can be organized and managed within the context of sales events, providing a seamless experience for both admins and users.
+
+Order Creation Flow
+The system allows authenticated users to create orders. The order creation flow is as follows:
+
+User Authentication:
+
+The user must be authenticated by logging in with their credentials (email and password).
+Upon successful login, the system generates a JWT token for the user.
+Order Creation:
+
+The authenticated user sends a request to create a new order.
+The request must include the order details such as the product IDs, quantities, and any other relevant information.
+Authorization Check:
+
+The system verifies the JWT token to ensure the request is made by an authenticated user.
+If the token is valid, the system proceeds with the order creation.
+Order Validation:
+
+The system validates the provided order details to ensure all required fields are present and correctly formatted.
+The system checks the availability of the products and their stock counts.
+If any required fields are missing, invalid, or if the products are out of stock, the system responds with an error message indicating the issues.
+Order Processing:
+
+Once the order details are validated, the system processes the order.
+The system updates the stock counts of the ordered products.
+The system calculates the total price of the order based on the product prices and quantities.
+Order Storage:
+
+The system stores the new order in the database.
+The system generates a unique identifier for the order and saves all relevant information.
+Response:
+
+The system responds with a success message indicating that the order has been created successfully.
+The response includes the details of the newly created order, such as the order ID, product details, quantities, and total price.
+This flow ensures that only authenticated users can create orders, and that all order details are validated before being processed and stored in the database.
+
+Handling Race Conditions
+Race conditions can occur when multiple processes or threads attempt to modify shared data concurrently. In the Happy Store application, race conditions are handled using the following strategies:
+
+Atomic Operations:
+
+Atomic operations ensure that a sequence of operations is completed without interruption. For example, updating the stock count of a product is performed as an atomic operation to prevent race conditions.
+Database Transactions:
+
+Database transactions are used to ensure that a series of database operations are executed as a single unit. If any operation in the transaction fails, the entire transaction is rolled back, ensuring data consistency.
+Optimistic Locking:
+
+Optimistic locking is used to handle concurrent updates to the same data. Each record includes a version number that is incremented with each update. When updating a record, the system checks the version number to ensure that the record has not been modified by another process.
+Pessimistic Locking:
+
+Pessimistic locking locks the data when it is being read or modified, preventing other processes from accessing the data until the lock is released. This approach is used in scenarios where the likelihood of concurrent modifications is high.
+Queueing:
+
+Queueing requests ensures that they are processed in a controlled manner, preventing concurrent access to shared resources. For example, order processing requests can be queued to ensure that they are handled sequentially.
+By implementing these strategies, the Happy Store application ensures data consistency and prevents race conditions, providing a reliable and robust system for managing e-commerce operations.
+
