@@ -186,8 +186,11 @@ The system allows only admin users to create sales events. The sales event creat
    - The response includes the details of the newly created sales event.
 
 7. **Sales Event Activation**:
-   - The system automatically activates the sales event based on the start date.
-   - A cron job or scheduled task checks for sales events that need to be activated and updates their `isActive` status to `true`.
+   - The system automatically activates the sales event based on the start date and time.
+   - A cron job checks for sales events that need to be activated and updates their `isActive` status to `true`.
+
+8. **Sales Event Activation**:
+   - Also we can make a sales event to be a occuring one by setting the scheduleOption to reoccuring and also provide the next start date for the event.
 
 This flow ensures that only authenticated admin users can create sales events, and that all sales event details are validated before being stored in the database. Additionally, the system handles the automatic activation of sales events based on their start date.
 
@@ -273,28 +276,9 @@ SalesEventSchema.pre("save", function (next) {
   next();
 });
 export default mongoose.model<ISalesEvent>('SalesEvent', SalesEventSchema);
+```typescript
 
-Product Model
-The Product model represents a product in the system. It includes details such as the name, description, price, and a reference to the associated sales event.
-
-import mongoose, { Schema, Document } from 'mongoose';
-
-export interface IProduct extends Document {
-  name: string;
-  description: string;
-  price: number;
-  salesEvent: mongoose.Types.ObjectId;
-}
-
-const ProductSchema: Schema = new Schema({
-  name: { type: String, required: true },
-  description: { type: String, required: true },
-  price: { type: Number, required: true },
-  salesEvent: { type: mongoose.Types.ObjectId, ref: 'SalesEvent' },
-});
-
-export default mongoose.model<IProduct>('Product', ProductSchema);
-
+**Sales Event Activation**:
 Relationship
 The relationship between SalesEvent and Product is established through the salesEvent field in the Product model. This field is a reference to the SalesEvent model, indicating that a product can be associated with a specific sales event.
 
