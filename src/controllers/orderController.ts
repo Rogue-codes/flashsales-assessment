@@ -1,82 +1,94 @@
-import { Response } from "express";
-import { AuthRequest } from "../middleware/authMiddleware";
-import Order from "../models/ordersModel";
-import SalesEvent from "../models/salesEventModel";
+import { Request, Response } from "express";
 import mongoose from "mongoose";
+import salesEventModel from "../models/salesEventModel";
+import orderModel from "../models/orderModel";
+import productModel from "../models/productModel";
+import { AuthRequest } from "../middleware/authMiddleware";
 
-export const createOrder = async (req: AuthRequest, res: Response): Promise<any> => {
-  const { salesEventId, products } = req.body;
-
-  if (!salesEventId) {
-    return res.status(400).json({ success: false, message: "salesEventId is required" });
-  }
-
-  if (!products || !Array.isArray(products) || products.length === 0) {
-    return res.status(400).json({ success: false, message: "At least one product is required" });
-  }
-
-  const user = req.user;
-
+// Create an order (Purchase product in flash sale)
+export const createOrder = async (req: AuthRequest, res: Response):Promise<any> => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const salesEvent = await SalesEvent.findById(salesEventId).session(session);
-    if (!salesEvent) {
-      await session.abortTransaction();
-      return res.status(404).json({ success: false, message: "Sales event not found" });
+    const { productId, quantity } = req.body;
+    const user = req.user;
+
+    if (!productId || !quantity || quantity < 1) {
+      return res.status(400).json({ success: false, message: "Invalid order data" });
     }
 
-    // Ensure stock availability & reduce stock
-    for (const item of products) {
-      const productInEvent = salesEvent.products.find((p) => p.productId.toString() === item.productId);
+    // Find active sales event for this product
+    const activeSale = await salesEventModel.findOne({ 
+      "products.productId": productId, 
+      isActive: true 
+    }).session(session);
 
-      if (!productInEvent) {
-        await session.abortTransaction();
-        return res.status(404).json({
-          success: false,
-          message: `Product with ID ${item.productId} not found in sales event`,
-        });
-      }
-
-      if (productInEvent.stockCount < item.quantity) {
-        await session.abortTransaction();
-        return res.status(400).json({
-          success: false,
-          message: `Insufficient stock for product ID ${item.productId}. Available: ${productInEvent.stockCount}`,
-        });
-      }
-
-      productInEvent.stockCount -= item.quantity; // Reduce stock
+    if (!activeSale) {
+      return res.status(400).json({ success: false, message: "No active sale for this product" });
     }
 
-    // Save updated sales event
-    await salesEvent.save({ session });
+    // Check if product exists
+    const product = await productModel.findById(productId).session(session);
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
 
-    // Create order
-    const newOrder = await Order.create(
-      [{ user, salesEventId, products, totalAmount: calculateTotal(products) }],
-      { session }
-    );
+    // Get the product details from the active sale
+    const saleProduct = activeSale.products.find(p => p.productId.toString() === productId);
+    if (!saleProduct || saleProduct.stockCount < quantity) {
+      return res.status(400).json({ success: false, message: "Not enough stock" });
+    }
 
+    // Calculate total amount
+    const totalAmount = saleProduct.price * quantity;
+
+    // Deduct stock from sales event
+    saleProduct.stockCount -= quantity;
+    await activeSale.save({ session });
+
+    // Create order record
+    const order = await orderModel.create([{ 
+      user: user._id, 
+      product: productId, 
+      quantity, 
+      totalAmount 
+    }], { session });
+
+    // Commit transaction
     await session.commitTransaction();
     session.endSession();
 
     return res.status(201).json({
       success: true,
-      message: "Order placed successfully",
-      data: newOrder,
+      message: "Purchase successful",
+      data: order
     });
+
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error("Error placing order:", error);
-    return res.status(500).json({ success: false, message: "Internal Server Error", error });
+    console.error("Order creation error:", error);
+    return res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
 
-// Helper function to calculate total amount
-const calculateTotal = (products: { price: number; quantity: number }[]) => {
-  return products.reduce((sum, item) => sum + item.price * item.quantity, 0);
-};
+// Get the leaderboard (sorted by purchase time)
+export const getLeaderboard = async (req: Request, res: Response):Promise<any> => {
+  try {
+    const leaderboard = await orderModel
+      .find()
+      .populate("user", "name email")  // Populate user info
+      .sort({ createdAt: 1 })  // Sort by earliest purchase
+      .limit(50); // Limit to top 50
 
+    return res.status(200).json({
+      success: true,
+      message: "Leaderboard retrieved successfully",
+      data: leaderboard,
+    });
+  } catch (error) {
+    console.error("Error fetching leaderboard:", error);
+    return res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
