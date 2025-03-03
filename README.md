@@ -32,11 +32,11 @@ Happy Store is an e-commerce application built with TypeScript, Express, and Mon
 
 3. Create a [.env](http://_vscodecontentref_/0) file in the root directory and add the following environment variables:
     ```env
+    MONGO_URI=mongodb+srv://nnamdi:xFzf80jcgRI7ma44@cluster0.rgeoj.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
     PORT=5000
-    MONGO_URI=your_mongodb_uri
-    JWT_SECRET=your_jwt_secret
-    USERNAME=your_email_username
-    APP_PASSWORD=your_email_app_password
+    USERNAME=eduarc4life@gmail.com
+    APP_PASSWORD=lffanukyodrnfxwj
+    JWT_SECRET=dsdfdgehetete
     ```
 
 4. For development, you can use:

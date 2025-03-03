@@ -47,7 +47,7 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<any>
       product: productId, 
       quantity, 
       totalAmount,
-      salesEvent: salesEventId // Link the order to the sales event
+      salesEvent: salesEventId
     }], { session });
 
     // Commit transaction
@@ -73,14 +73,14 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<any>
 // Get the leaderboard (sorted by purchase time)
 export const getLeaderboard = async (req: Request, res: Response): Promise<any> => {
   try {
-    const { salesEventId } = req.params; // Get salesEventId from request params
+    const { salesEventId } = req.params; 
 
     if (!salesEventId) {
       return res.status(400).json({ success: false, message: "Sales event ID is required" });
     }
 
     const leaderboard = await ordersModel
-      .find({ salesEvent: salesEventId }) // Filter by sales event
+      .find({ salesEvent: salesEventId }) 
       .populate("user", "name email") // Populate user info
       .sort({ createdAt: -1 }) // Sort by latest purchase first
       .limit(50); // Limit to top 50
