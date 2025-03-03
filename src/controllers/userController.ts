@@ -175,10 +175,112 @@ export const login = async (req: Request, res: Response): Promise<any> => {
 };
 
 // forgot password
-export const forgotPassword = async (req: Request, res: Response) => {};
+export const forgotPassword = async (req: Request, res: Response):Promise<any> => {
+  try {
+    if (!validateReq(req, res, ["email"])) {
+      return;
+    }
+
+    const { email } = req.body;
+    const user = await userModel.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: `User with email ${email} does not exist`,
+      });
+    }
+
+    // Generate OTP and send email
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const hashedOtp = await bcrypt.hash(otpCode, 10);
+
+    await Otp.create({
+      email,
+      code: hashedOtp,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+    });
+
+    // emit an event to send welcome email
+    eventEmitter.emit(EventTypes.SEND_FORGOT_PASSWORD_EMAIL, {
+      name: user.firstName,
+      email: user.email,
+      code: otpCode,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "OTP sent to email",
+    });
+  } catch (error: any) {
+    console.log(error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 // reset password
-export const resetPassword = async (req: Request, res: Response) => {};
+export const resetPassword = async (req: Request, res: Response):Promise<any> => {
+  try {
+    if (!validateReq(req, res, ["email", "code", "newPassword"])) {
+      return;
+    }
+
+    const { email, code, newPassword } = req.body;
+    const user = await userModel.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: `User with email ${email} does not exist`,
+      });
+    }
+
+    const validOtp = await Otp.findOne({ email });
+
+    if (!validOtp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP code",
+      });
+    }
+
+    // Check if OTP has expired
+    if (new Date(validOtp.expiresAt as Date).getTime() < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP code has expired",
+      });
+    }
+
+    // Compare OTP code
+    const validCode = await bcrypt.compare(code, validOtp.code as string);
+
+    if (!validCode) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP code",
+      });
+    }
+
+    // Update user password
+    user.password = newPassword;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Password reset successful",
+    });
+  } catch (error: any) {
+    console.log(error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 const validateReq = (
   req: Request,
